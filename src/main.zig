@@ -31,6 +31,10 @@ fn valueItemCompare(void_val: void, lhs: ValueItem, rhs: ValueItem) bool {
 }
 
 pub fn get_cheapest_value(value_items: []const ValueItem, min_items: u32, allocator: std.mem.Allocator) ![]ValueItem {
+    if (min_items == 0) {
+        return try default_allocator.dupe(ValueItem, value_items);
+    }
+
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const arena_allocator_allocator = arena_allocator.allocator();
     defer arena_allocator.deinit();
@@ -82,7 +86,7 @@ pub fn get_cheapest_value(value_items: []const ValueItem, min_items: u32, alloca
     std.mem.sort(ValueItem, smaller.items, {}, valueItemCompare);
 
     var to_beat: u32 = cheapest.cost;
-    const tree = try Tree(Sum).init(.{.amount = 0, .cost = 0, .index = smaller.items.len}, &arena_allocator, smaller.items.len);
+    const tree = try Tree(Sum).init(.{.amount = 0, .cost = 0, .index = smaller.items.len}, &arena_allocator);
     var result_holder = ResultHolder{.leaf_pointer = tree.root};
     try calculate_best_sum(smaller.items, tree.root, &to_beat, &result_holder, min_items);
     var result = std.ArrayList(ValueItem).init(arena_allocator_allocator);
@@ -114,11 +118,14 @@ fn calculate_best_sum(list: []ValueItem, leaf: *Leaf(Sum), to_beat: *u32, best_l
         current_sum.cost += current.cost;
         const new_leaf = try leaf.add_child(current_sum);
         if (current_sum.amount >= min_items) {
+            // We found a solution
             if (current_sum.cost < to_beat.*) {
                 to_beat.* = current_sum.cost;
                 best_leaf.leaf_pointer = new_leaf;
             }
         } else {
+            // Not a solution, recurse farther into the tree
+            // We don't want to consider any cost that is not better than the found optimum
             if (current_sum.cost < to_beat.*) {
                 try calculate_best_sum(list, new_leaf, to_beat, best_leaf,min_items);
             }
@@ -126,17 +133,13 @@ fn calculate_best_sum(list: []ValueItem, leaf: *Leaf(Sum), to_beat: *u32, best_l
     }
 }
 
-test "simple test" {
-    const val = ValueItem{
-        .amount = 3,
-        .cost = 4
-    };
-    const val_arr = [_]ValueItem{val, .{.amount = 2, .cost = 3}};
+test "one value bigger than requirement" {
+    const val_arr = [_]ValueItem{.{.amount = 3, .cost = 4}, .{.amount = 2, .cost = 3}};
     const result = try get_cheapest_value(val_arr[0..], 2, default_allocator);
-    std.debug.print("{any}\n", .{result});
+    try std.testing.expectEqualDeep(&[_]ValueItem{.{.amount = 2, .cost = 3}}, result);
 }
 
-test "simple test 2" {
+test "all values used" {
     const val = ValueItem{
         .amount = 3,
         .cost = 4
@@ -146,8 +149,14 @@ test "simple test 2" {
     std.debug.print("Result: {any}\n", .{result});
 }
 
-test "complicated test" {
+test "more difficult example" {
     const val_arr = [_]ValueItem{.{.amount = 2, .cost = 3},.{.amount = 2, .cost = 3},.{.amount = 2, .cost = 3},.{.amount = 2, .cost = 3},.{.amount = 5, .cost = 12},.{.amount = 2, .cost = 3},};
     const result = try get_cheapest_value(val_arr[0..], 7, default_allocator);
     std.debug.print("Result: {any}\n", .{result});
+}
+
+test "no solution" {
+    const val_arr = [_]ValueItem{.{.amount = 2, .cost = 3}, .{.amount = 2, .cost = 3}};
+    const result = try get_cheapest_value(val_arr[0..], 5, default_allocator);
+    try std.testing.expectEqual(0, result.len);
 }

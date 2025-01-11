@@ -7,8 +7,7 @@ pub fn Leaf(comptime T: type) type {
     return struct {
         elem: T,
         _parent: ?*Leaf(T),
-        children: []*Leaf(T),
-        number_of_children: usize = 0,
+        children: std.ArrayList(*Leaf(T)),
         tree: *Tree(T),
 
         fn init(tree: *Tree(T), value: T, parent: ?*Leaf(T)) !*Leaf(T) {
@@ -16,9 +15,7 @@ pub fn Leaf(comptime T: type) type {
             result.elem = value;
             result._parent = parent;
             result.tree = tree;
-            result.number_of_children = 0;
-            result.children = try tree.arenaAllocator.allocator().alloc(*Leaf(T), tree.max_children);
-
+            result.children = std.ArrayList(*Leaf(T)).init(tree.arenaAllocator.allocator());
             return result;
         }
 
@@ -31,14 +28,9 @@ pub fn Leaf(comptime T: type) type {
         }
         
         pub fn add_child(self: *Leaf(T), value: T) !*Leaf(T) {
-            if (self.number_of_children < self.tree.max_children) {
-                const leaf = try Leaf(T).init(self.tree, value, self);
-                self.children[self.number_of_children] = leaf;
-                self.number_of_children += 1;
-                return self.children[self.number_of_children - 1];
-            } else {
-                return error.TooManyChildren;
-            }
+            const leaf = try Leaf(T).init(self.tree, value, self);
+            try self.children.append(leaf);
+            return leaf;
         }
     };
 }
@@ -47,12 +39,10 @@ pub fn Tree(comptime T: type) type {
     return struct {
         root: *Leaf(T),
         arenaAllocator: std.heap.ArenaAllocator,
-        max_children: usize,
 
-        pub fn init(value: T, arenaAllocator: *std.heap.ArenaAllocator, max_children: usize) !*Tree(T) {
+        pub fn init(value: T, arenaAllocator: *std.heap.ArenaAllocator) !*Tree(T) {
             var result = try arenaAllocator.allocator().create(Tree(T));
             result.arenaAllocator = arenaAllocator.*;
-            result.max_children = max_children;
             result.root = try Leaf(T).init(result, value, null);
             return result;
         }
@@ -61,14 +51,17 @@ pub fn Tree(comptime T: type) type {
 
 test "create tree" {
     var arenaAllocator = std.heap.ArenaAllocator.init(default_allocator);
-    const newTree = try Tree(u32).init(3, &arenaAllocator,3);
-    std.debug.print("{d}\n", .{newTree.root.elem});
+    const newTree = try Tree(u32).init(3, &arenaAllocator);
+    try std.testing.expectEqual(3, newTree.root.elem);
 }
 
 test "add leaf to root" {
     var arenaAllocator = std.heap.ArenaAllocator.init(default_allocator);
-    var newTree = try Tree(u32).init(5, &arenaAllocator,3);
+    var newTree = try Tree(u32).init(5, &arenaAllocator);
     const result = try newTree.root.add_child(2);
+    _ = result;
     const result2 = try newTree.root.add_child(4);
-    std.debug.print("{d} {d}\n", .{result.elem, result2.elem});
+    _ = result2;
+    try std.testing.expectEqual(2, newTree.root.children.items[0].elem);
+    try std.testing.expectEqual(4, newTree.root.children.items[1].elem);
 }
