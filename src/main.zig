@@ -40,6 +40,8 @@ pub fn get_cheapest_value(value_items: []const ValueItem, min_items: u32, alloca
     defer arena_allocator.deinit();
     var smaller = std.ArrayList(ValueItem).init(arena_allocator_allocator);
     var bigger = std.ArrayList(ValueItem).init(arena_allocator_allocator);
+
+
     for (value_items) |item| {
         if (item.amount < min_items) {
             try smaller.append(item);
@@ -85,10 +87,17 @@ pub fn get_cheapest_value(value_items: []const ValueItem, min_items: u32, alloca
 
     std.mem.sort(ValueItem, smaller.items, {}, valueItemCompare);
 
+    var smallerCummulSum = try std.ArrayList(u32).initCapacity(arena_allocator_allocator, smaller.items.len);
+    var cummulSum: u32 = 0;
+    for (smaller.items) |item| {
+        cummulSum += item.amount;
+        try smallerCummulSum.append(cummulSum);
+    }
+
     var to_beat: u32 = cheapest.cost;
     const tree = try Tree(Sum).init(.{.amount = 0, .cost = 0, .index = smaller.items.len}, &arena_allocator);
     var result_holder = ResultHolder{.leaf_pointer = tree.root};
-    try calculate_best_sum(smaller.items, tree.root, &to_beat, &result_holder, min_items);
+    try calculate_best_sum(smaller.items, tree.root, &to_beat, &result_holder, min_items, smallerCummulSum.items);
     var result = std.ArrayList(ValueItem).init(arena_allocator_allocator);
     var current_leaf_pointer = result_holder.leaf_pointer;
     var tempList = std.ArrayList(Sum).init(default_allocator);
@@ -107,10 +116,14 @@ pub fn get_cheapest_value(value_items: []const ValueItem, min_items: u32, alloca
 
 }
 
-fn calculate_best_sum(list: []ValueItem, leaf: *Leaf(Sum), to_beat: *u32, best_leaf: *ResultHolder, min_items: u32) !void {
+fn calculate_best_sum(list: []ValueItem, leaf: *Leaf(Sum), to_beat: *u32, best_leaf: *ResultHolder, min_items: u32, cummulSum: []u32) !void {
     var i = leaf.elem.index;
     while (i >= 1): (i -= 1) {
         const index = i - 1;
+        // We can stop recursing if we know that the commulative sum of all the smaller elements + the current value is not sufficient to satisfy the limit
+        if (index > 0 and ((leaf.elem.amount + cummulSum[i-1]) < min_items)) {
+            continue;
+        }
         var current_sum = leaf.elem;
         current_sum.index = index;
         const current = list[index];
@@ -127,7 +140,7 @@ fn calculate_best_sum(list: []ValueItem, leaf: *Leaf(Sum), to_beat: *u32, best_l
             // Not a solution, recurse farther into the tree
             // We don't want to consider any cost that is not better than the found optimum
             if (current_sum.cost < to_beat.*) {
-                try calculate_best_sum(list, new_leaf, to_beat, best_leaf,min_items);
+                try calculate_best_sum(list, new_leaf, to_beat, best_leaf,min_items, cummulSum);
             }
         }
     }
